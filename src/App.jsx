@@ -19,6 +19,7 @@ import DevelopmentDetailsPage from "./pages/DevelopmentDetailsPage";
 import NewsDetailsPage from "./pages/NewsDetailsPage";
 import WardTeam from "./pages/WardTeam";
 import VisitorCounter from "./components/VisitorCounter";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 function Home() {
   return (
@@ -71,6 +72,10 @@ export default function App() {
         <Route path="/news/:id" element={<NewsDetailsPage />} />
         <Route path="/ward-team" element={<WardTeam />} />
       </Routes>
+
+    <SpeedInsights />
+      
     </BrowserRouter>
+    
   );
 }
