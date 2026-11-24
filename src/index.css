@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&');
+@import "tailwindcss";
+
+:root {
+  --color-primary: #ff6d29;
+  --color-brown: #453027;
+  --color-dark: #161316;
+  --color-muted: #bababa;
+  --color-white: #ffffff;
+  --color-peach: #f6d2bd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-dark);
+  color: var(--color-white);
+  font-family: "Manrope", sans-serif;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+
+/* Sarthak Vyas signature glow */
+.sarthak-glow {
+  color: #ff6d29;
+  text-shadow:
+    0 0 5px rgba(255, 109, 41, 0.35),
+    0 0 12px rgba(255, 109, 41, 0.2);
+  animation: sarthakGlow 2.5s ease-in-out infinite alternate;
+  transition: all 0.3s ease;
+}
+
+.sarthak-glow:hover {
+  text-shadow:
+    0 0 6px rgba(255, 109, 41, 0.7),
+    0 0 18px rgba(255, 109, 41, 0.5),
+    0 0 35px rgba(255, 109, 41, 0.3);
+}
+
+@keyframes sarthakGlow {
+  from {
+    text-shadow:
+      0 0 4px rgba(255, 109, 41, 0.3),
+      0 0 10px rgba(255, 109, 41, 0.15);
+  }
+
+  to {
+    text-shadow:
+      0 0 7px rgba(255, 109, 41, 0.65),
+      0 0 20px rgba(255, 109, 41, 0.35);
+  }
+}
