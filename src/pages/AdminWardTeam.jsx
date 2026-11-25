@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getWardTeam, saveWardTeam } from "../utils/wardTeamApi";
 import {
   Users,
@@ -259,6 +259,7 @@ function MemberPhoto({ photo, name, size = "h-20 w-20" }) {
 export default function AdminWardTeam() {
   const [data, setData] = useState(createInitialData);
   const [loaded, setLoaded] = useState(false);
+  const skipFirstSave = useRef(true);
   const [activeTab, setActiveTab] = useState("leadership");
   const [activeBooth, setActiveBooth] = useState(1);
   const [search, setSearch] = useState("");
@@ -293,31 +294,33 @@ export default function AdminWardTeam() {
   }, []);
 
   // Save data to MongoDB + local backup
-  useEffect(() => {
-    if (!loaded) return;
+useEffect(() => {
+  if (!loaded) return;
 
-    const saveToServer = async () => {
+  // Initial server/local data load par save skip karo
+  if (skipFirstSave.current) {
+    skipFirstSave.current = false;
+    return;
+  }
+
+  const saveToServer = async () => {
+    try {
+      await saveWardTeam(data);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      console.log("Ward Team saved to MongoDB ✅");
+    } catch (error) {
+      console.error("Ward Team save error:", error);
       try {
-        await saveWardTeam(data);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        console.log("Ward Team saved to MongoDB ✅");
-      } catch (error) {
-        console.error("Ward Team save error:", error);
-
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-          console.log("Ward Team saved locally as backup");
-        } catch (localError) {
-          console.error("Local backup error:", localError);
-          alert(
-            "Storage bhar gaya hai. Kuch photos chhoti karo ya kuch purani photos hatao."
-          );
-        }
+        console.log("Ward Team saved locally as backup");
+      } catch (localError) {
+        console.error("Local backup error:", localError);
       }
-    };
+    }
+  };
 
-    saveToServer();
-  }, [data, loaded]);
+  saveToServer();
+}, [data, loaded]);
 
   // Ward Team calculations
   const safeData = normalizeWardTeam(data);

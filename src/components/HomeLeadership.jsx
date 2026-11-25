@@ -1,4 +1,4 @@
-
+import { getWardTeam } from "../utils/wardTeamApi";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import VisitorCounter from "./VisitorCounter";
@@ -147,14 +147,24 @@ export default function HomeLeadership() {
   const [data, setData] = useState(emptyData);
   const [showAbout, setShowAbout] = useState(false);
 
-  useEffect(() => {
-    setData(getData());
+useEffect(() => {
+  const loadData = async () => {
+    try {
+      const serverData = await getWardTeam();
 
-    const refresh = () => setData(getData());
-    window.addEventListener("storage", refresh);
+      if (serverData) {
+        setData(serverData);
+      } else {
+        setData(getData());
+      }
+    } catch (error) {
+      console.error("Ward Team load error:", error);
+      setData(getData());
+    }
+  };
 
-    return () => window.removeEventListener("storage", refresh);
-  }, []);
+  loadData();
+}, []);
 
   const leaders = data.leaders || {};
   const booths = data.booths || [];
