@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { LockKeyhole, Eye, EyeOff, ArrowRight, ShieldCheck } from "lucide-react";
+import { loginAdmin } from "../utils/wardTeamApi";
 
 export default function AdminLogin({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -9,16 +10,17 @@ export default function AdminLogin({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
 
-  function handleSubmit(e) {
-    e.preventDefault();
+async function handleSubmit(e) {
+  e.preventDefault();
+  setError("");
 
-    if (username === "admin" && password === "ward123") {
-      setError("");
-      onLogin();
-    } else {
-      setError("Invalid username or password.");
-    }
+  try {
+    await loginAdmin(username, password);
+    onLogin();
+  } catch (error) {
+    setError(error.message || "Invalid username or password.");
   }
+}
 
   return (
     <div className="min-h-screen bg-[#161316] flex items-center justify-center px-5 py-10 relative overflow-hidden">

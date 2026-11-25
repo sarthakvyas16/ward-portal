@@ -13,6 +13,8 @@ import {
   Users,
   Clock,
   CheckCircle2,
+  LogOut,
+  
 } from "lucide-react";
 
 import AdminDevelopment from "./AdminDevelopment";
@@ -20,7 +22,7 @@ import AdminComplaints from "./AdminComplaints";
 import AdminNews from "./AdminNews";
 import AdminWardTeam from "./AdminWardTeam";
 
-export default function Admin() {
+export default function Admin({ onLogout }) {
   const [activeTab, setActiveTab] = useState("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -185,7 +187,16 @@ export default function Admin() {
             <div className="w-10 h-10 rounded-xl bg-[#453027] text-white flex items-center justify-center font-extrabold text-sm">
               A
             </div>
+            <button
+    onClick={onLogout}
+    title="Logout"
+    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition"
+  >
+    <LogOut size={16} />
+    <span className="hidden sm:inline">Logout</span>
+  </button>
           </div>
+
         </header>
 
         {/* Main Content */}

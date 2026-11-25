@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getWardTeam, saveWardTeam } from "../utils/wardTeamApi";
 import {
   Users,
   Crown,
@@ -188,62 +189,122 @@ export default function AdminWardTeam() {
   const [draft, setDraft] = useState(emptyMember);
   const [photoLoading, setPhotoLoading] = useState(false);
 
-  // Load data (new format first, old format migration second)
-  useEffect(() => {
+  
+  // Load Ward Team data from MongoDB, fallback to localStorage
+useEffect(() => {
+  const loadWardTeam = async () => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      // First, try loading from MongoDB
+      const serverData = await getWardTeam();
+      console.log("MongoDB Ward Team Data:", serverData);
 
-      if (saved) {
-        setData(JSON.parse(saved));
+      if (serverData) {
+        setData(serverData);
+        console.log("Ward Team loaded from MongoDB ✅");
       } else {
-        const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
+        // If MongoDB is empty, load old local data
+        const saved = localStorage.getItem(STORAGE_KEY);
 
-        if (oldSaved) {
-          const migrated = migrateOldMembers(JSON.parse(oldSaved));
-          setData(migrated);
+        if (saved) {
+          setData(JSON.parse(saved));
+        } else {
+          const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
+
+          if (oldSaved) {
+            const migrated = migrateOldMembers(JSON.parse(oldSaved));
+            setData(migrated);
+          }
         }
+
+        console.log("Local Ward Team data loaded");
       }
     } catch (error) {
-      console.error("Ward team load error:", error);
+      console.error("Ward Team load error:", error);
+
+      // If API fails, fallback to localStorage
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+
+        if (saved) {
+          setData(JSON.parse(saved));
+        } else {
+          const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
+
+          if (oldSaved) {
+            setData(migrateOldMembers(JSON.parse(oldSaved)));
+          }
+        }
+      } catch (localError) {
+        console.error("Local data load error:", localError);
+      }
+    } finally {
+      setLoaded(true);
     }
+  };
 
-    setLoaded(true);
-  }, []);
+  loadWardTeam();
+}, []);
 
-  // Save data
-  useEffect(() => {
-    if (!loaded) return;
+  // Save Ward Team to MongoDB + Local Backup
+useEffect(() => {
+  if (!loaded) return;
 
+  const saveToServer = async () => {
     try {
+      await saveWardTeam(data);
+
+      // Local backup bhi maintain rahega
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+
+      console.log("Ward Team saved to MongoDB ✅");
     } catch (error) {
-      console.error("Ward team save error:", error);
-      alert(
-        "Storage bhar gaya hai. Kuch photos chhoti karo ya kuch purani photos hatao."
-      );
+      console.error("Ward Team save error:", error);
+
+      // Server fail hone par local backup
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        console.log("Ward Team saved locally as backup");
+      } catch (localError) {
+        console.error("Local backup error:", localError);
+        alert(
+          "Storage bhar gaya hai. Kuch photos chhoti karo ya kuch purani photos hatao."
+        );
+      }
     }
-  }, [data, loaded]);
+  };
 
-  const allMembers = [
-    ...Object.values(data.leaders).filter(Boolean),
-    ...data.booths.flatMap((booth) => [
-      ...(booth.chairman ? [booth.chairman] : []),
-      ...booth.committee,
-    ]),
-    ...data.others,
-  ];
+  saveToServer();
+}, [data, loaded]);
 
-  const totalCommittee = data.booths.reduce(
-    (total, booth) => total + booth.committee.length,
-    0
+// Ward Team calculations
+const allMembers = [
+  ...Object.values(data.leaders).filter(Boolean),
+  ...data.booths.flatMap((booth) =>
+    [booth.chairman, ...booth.committee].filter(Boolean)
+  ),
+  ...data.others,
+];
+
+const totalCommittee = data.booths.reduce(
+  (total, booth) => total + booth.committee.length,
+  0
+);
+
+const filteredMembers = (members) => {
+  const query = search.trim().toLowerCase();
+
+  if (!query) return members;
+
+  return members.filter((member) =>
+    [member.name, member.designation, member.phone].some((value) =>
+      (value || "").toLowerCase().includes(query)
+    )
   );
+};
 
-  const filteredMembers = (members) =>
-    members.filter((member) =>
-      `${member.name} ${member.designation} ${member.phone}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
+
+
+
 
   // Open editor
   const openEditor = (type, boothId = null, member = null) => {

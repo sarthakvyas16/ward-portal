@@ -51,10 +51,17 @@ function Home() {
 }
 
 function AdminWrapper() {
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(
+    !!localStorage.getItem("admin_token")
+  );
+
+  function handleLogout() {
+    localStorage.removeItem("admin_token");
+    setLoggedIn(false);
+  }
 
   return loggedIn ? (
-    <Admin />
+    <Admin onLogout={handleLogout} />
   ) : (
     <AdminLogin onLogin={() => setLoggedIn(true)} />
   );
