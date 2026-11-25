@@ -1,5 +1,8 @@
-const API_URL = "http://localhost:5000/api/ward-team";
-const AUTH_URL = "http://localhost:5000/api/auth/login";
+
+const BASE_URL = import.meta.env.VITE_API_URL;
+
+const API_URL = `${BASE_URL}/api/ward-team`;
+const AUTH_URL = `${BASE_URL}/api/auth/login`;
 
 // Admin Login API
 export async function loginAdmin(username, password) {
@@ -17,9 +20,7 @@ export async function loginAdmin(username, password) {
     throw new Error(result.message || "Login failed");
   }
 
-  // Token save
   localStorage.setItem("admin_token", result.token);
-
   return result;
 }
 
@@ -29,8 +30,8 @@ export async function getWardTeam() {
     const response = await fetch(API_URL);
     const result = await response.json();
 
-    if (!result.success) {
-      throw new Error("Ward Team load nahi hui");
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Ward Team load nahi hui");
     }
 
     return result.data;
@@ -56,6 +57,7 @@ export async function saveWardTeam(data) {
   const result = await response.json();
 
   if (response.status === 401 || response.status === 403) {
+    localStorage.removeItem("admin_token");
     throw new Error("Admin session expired. Please login again.");
   }
 
