@@ -9,7 +9,9 @@ const wardTeamRoutes = require("./routes/wardTeamRoutes");
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+
+// Increased limit for Base64 member photos
+app.use(express.json({ limit: "15mb" }));
 
 app.use("/api/ward-team", wardTeamRoutes);
 app.use("/api/auth", authRoutes);
