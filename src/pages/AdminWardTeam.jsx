@@ -278,11 +278,11 @@ useEffect(() => {
 
 // Ward Team calculations
 const allMembers = [
-  ...Object.values(data.leaders).filter(Boolean),
-  ...data.booths.flatMap((booth) =>
-    [booth.chairman, ...booth.committee].filter(Boolean)
+  ...Object.values(data?.leaders || {}).filter(Boolean),
+  ...(Array.isArray(data?.booths) ? data.booths : []).flatMap((booth) =>
+    [booth?.chairman, ...(Array.isArray(booth?.committee) ? booth.committee : [])].filter(Boolean)
   ),
-  ...data.others,
+  ...(Array.isArray(data?.others) ? data.others : []),
 ];
 
 const totalCommittee = data.booths.reduce(
