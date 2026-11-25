@@ -15,88 +15,49 @@ import {
   Search,
   ArrowLeft,
 } from "lucide-react";
-import { getMedia } from "../utils/mediaStorage";
-
-const STORAGE_KEY = "ward_development_projects";
+import { getDevelopmentProjects } from "../utils/developmentApi";
 
 export default function Development({ fullPage = false }) {
   const [projects, setProjects] = useState([]);
-  const [mediaMap, setMediaMap] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [selectedProject, setSelectedProject] = useState(null);
   const [photoViewer, setPhotoViewer] = useState(null);
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Load projects and media
+  // MongoDB + Cloudinary se published projects load
   useEffect(() => {
     let cancelled = false;
-    const objectUrls = [];
-
-    async function createMediaUrl(mediaId) {
-      if (!mediaId) return null;
-
-      try {
-        const media = await getMedia(mediaId);
-        if (!media?.blob || cancelled) return null;
-
-        const url = URL.createObjectURL(media.blob);
-        objectUrls.push(url);
-        return url;
-      } catch (error) {
-        console.error("Media load error:", error);
-        return null;
-      }
-    }
 
     async function loadProjects() {
       try {
-        const stored = JSON.parse(
-          localStorage.getItem(STORAGE_KEY) || "[]"
+        setLoading(true);
+        setLoadError("");
+
+        const result = await getDevelopmentProjects();
+
+        if (cancelled) return;
+
+        const published = (Array.isArray(result) ? result : []).filter(
+          (project) => project.isPublished === true
         );
 
-        const published = stored.filter((project) => project.published);
+        const sorted = [...published].sort((a, b) => {
+          const dateA = new Date(a.date || a.createdAt || 0).getTime();
+          const dateB = new Date(b.date || b.createdAt || 0).getTime();
+          return dateB - dateA;
+        });
 
-        const sorted = [...published].sort(
-          (a, b) =>
-            new Date(b.date || 0).getTime() -
-            new Date(a.date || 0).getTime()
-        );
-
-        const assets = {};
-
-        for (const project of sorted) {
-          const cover = await createMediaUrl(project.coverId);
-
-          const photos = await Promise.all(
-            (project.photos || []).map((item) =>
-              createMediaUrl(
-                typeof item === "string" ? item : item?.id
-              )
-            )
-          );
-
-          const videos = await Promise.all(
-            (project.videos || []).map((item) =>
-              createMediaUrl(
-                typeof item === "string" ? item : item?.id
-              )
-            )
-          );
-
-          assets[project.id] = {
-            cover,
-            photos: photos.filter(Boolean),
-            videos: videos.filter(Boolean),
-          };
-        }
-
-        if (!cancelled) {
-          setProjects(sorted);
-          setMediaMap(assets);
-        }
+        setProjects(sorted);
       } catch (error) {
         console.error("Development load error:", error);
+
+        if (!cancelled) {
+          setLoadError(
+            error.message || "Development projects load nahi ho paaye."
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -104,57 +65,70 @@ export default function Development({ fullPage = false }) {
 
     loadProjects();
 
-    function refreshProjects() {
-      loadProjects();
-    }
-
-    window.addEventListener("storage", refreshProjects);
-    window.addEventListener("ward-development-updated", refreshProjects);
-
     return () => {
       cancelled = true;
-      window.removeEventListener("storage", refreshProjects);
-      window.removeEventListener("ward-development-updated", refreshProjects);
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
 
-// Keyboard controls
-useEffect(() => {
-  function handleKeyDown(event) {
-    if (event.key === "Escape") {
-      setSelectedProject(null);
-      setPhotoViewer(null);
+  // Keyboard controls for fullscreen photo viewer
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setSelectedProject(null);
+        setPhotoViewer(null);
+      }
+
+      if (photoViewer && event.key === "ArrowRight") {
+        setPhotoViewer((prev) => ({
+          ...prev,
+          index: (prev.index + 1) % prev.images.length,
+        }));
+      }
+
+      if (photoViewer && event.key === "ArrowLeft") {
+        setPhotoViewer((prev) => ({
+          ...prev,
+          index:
+            (prev.index - 1 + prev.images.length) % prev.images.length,
+        }));
+      }
     }
 
-    if (photoViewer && event.key === "ArrowRight") {
-      setPhotoViewer((prev) => ({
-        ...prev,
-        index: (prev.index + 1) % prev.images.length,
-      }));
-    }
+    window.addEventListener("keydown", handleKeyDown);
 
-    if (photoViewer && event.key === "ArrowLeft") {
-      setPhotoViewer((prev) => ({
-        ...prev,
-        index:
-          (prev.index - 1 + prev.images.length) % prev.images.length,
-      }));
-    }
-  }
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [photoViewer]);
 
-  window.addEventListener("keydown", handleKeyDown);
+  // MongoDB project ID support (_id and id)
+  const getProjectId = (project) => project?._id || project?.id;
 
-  return () => {
-    window.removeEventListener("keydown", handleKeyDown);
+  // Cloudinary media URL helpers
+  const getCoverUrl = (project) => {
+    if (typeof project?.cover === "string") return project.cover;
+    return project?.cover?.url || "";
   };
-}, [photoViewer]);
+
+  const getPhotoUrls = (project) =>
+    (project?.photos || [])
+      .map((item) => (typeof item === "string" ? item : item?.url))
+      .filter(Boolean);
+
+  const getVideoUrls = (project) =>
+    (project?.videos || [])
+      .map((item) => (typeof item === "string" ? item : item?.url))
+      .filter(Boolean);
 
   // Format date
   const formatDate = (date) => {
     if (!date) return "Date not specified";
 
-    return new Date(date + "T00:00:00").toLocaleDateString("en-IN", {
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) return "Date not specified";
+
+    return parsedDate.toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -241,7 +215,7 @@ useEffect(() => {
         </div>
 
         {/* Search and Filters */}
-        {fullPage && !loading && projects.length > 0 && (
+        {fullPage && !loading && !loadError && projects.length > 0 && (
           <div className="mb-9 space-y-4">
             <div className="relative max-w-md">
               <Search
@@ -293,8 +267,24 @@ useEffect(() => {
           </div>
         )}
 
+        {/* Error State */}
+        {!loading && loadError && (
+          <div className="border border-red-500/20 bg-red-500/5 rounded-2xl py-12 px-6 text-center">
+            <Construction size={40} className="text-[#FF6D29] mx-auto mb-5" />
+
+            <h3 className="text-xl font-bold text-white">
+              Development Updates Load Nahi Ho Paaye
+            </h3>
+
+            <p className="text-[#BABABA] text-sm mt-3">
+              Server se data load karne mein dikkat hui. Kripya thodi der baad
+              dobara visit karein.
+            </p>
+          </div>
+        )}
+
         {/* Empty State */}
-        {!loading && visibleProjects.length === 0 && (
+        {!loading && !loadError && visibleProjects.length === 0 && (
           <div className="border border-white/10 bg-[#453027]/20 rounded-2xl py-16 px-6 text-center">
             <Construction
               size={40}
@@ -316,120 +306,126 @@ useEffect(() => {
         )}
 
         {/* Project Cards */}
-        {!loading && visibleProjects.length > 0 && (
+        {!loading && !loadError && visibleProjects.length > 0 && (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {visibleProjects.map((project, index) => (
-              <motion.article
-                key={project.id}
-                initial={{ opacity: 0, y: 25 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.45, delay: index * 0.06 }}
-                className="group bg-[#453027]/30 border border-white/10 rounded-2xl overflow-hidden hover:border-[#FF6D29]/40 transition-all duration-300"
-              >
-                {/* Cover */}
-                <div className="relative h-56 bg-[#453027] overflow-hidden">
-                  {mediaMap[project.id]?.cover ? (
-                    <img
-                      src={mediaMap[project.id].cover}
-                      alt={project.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#453027] to-[#161316]">
-                      <Construction
-                        size={50}
-                        className="text-[#FF6D29]/60"
+            {visibleProjects.map((project, index) => {
+              const projectId = getProjectId(project);
+              const coverUrl = getCoverUrl(project);
+              const photos = getPhotoUrls(project);
+              const videos = getVideoUrls(project);
+
+              return (
+                <motion.article
+                  key={projectId}
+                  initial={{ opacity: 0, y: 25 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.45, delay: index * 0.06 }}
+                  className="group bg-[#453027]/30 border border-white/10 rounded-2xl overflow-hidden hover:border-[#FF6D29]/40 transition-all duration-300"
+                >
+                  {/* Cover */}
+                  <div className="relative h-56 bg-[#453027] overflow-hidden">
+                    {coverUrl ? (
+                      <img
+                        src={coverUrl}
+                        alt={project.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#453027] to-[#161316]">
+                        <Construction
+                          size={50}
+                          className="text-[#FF6D29]/60"
+                        />
+                      </div>
+                    )}
+
+                    <span
+                      className={`absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(
+                        project.status
+                      )}`}
+                    >
+                      {project.status || "Planned"}
+                    </span>
+                  </div>
+
+                  {/* Card Content */}
+                  <div className="p-6">
+                    {project.area && (
+                      <div className="flex items-center gap-2 text-[#FF6D29] text-xs font-semibold uppercase tracking-wider mb-3">
+                        <MapPin size={14} />
+                        {project.area}
+                      </div>
+                    )}
+
+                    <h3 className="text-xl font-bold text-white leading-snug">
+                      {project.title}
+                    </h3>
+
+                    <p className="text-[#BABABA] text-sm leading-6 mt-3 line-clamp-3">
+                      {project.description}
+                    </p>
+
+                    <div className="flex items-center justify-between gap-3 mt-6 pt-4 border-t border-white/10">
+                      <div className="flex items-center gap-2 text-xs text-[#BABABA]">
+                        <CalendarDays size={15} className="text-[#FF6D29]" />
+                        {formatDate(project.date)}
+                      </div>
+
+                      <Link
+                        to={`/development/${projectId}`}
+                        className="flex items-center gap-1 text-[#FF6D29] text-sm font-semibold hover:gap-2 transition-all"
+                      >
+                        Details
+                        <ArrowUpRight size={16} />
+                      </Link>
                     </div>
-                  )}
 
-                  <span
-                    className={`absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(
-                      project.status
-                    )}`}
-                  >
-                    {project.status || "Planned"}
-                  </span>
-                </div>
+                    {/* Media Counts */}
+                    {(photos.length > 0 || videos.length > 0) && (
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        {photos.length > 0 && (
+                          <span className="text-xs text-[#BABABA] bg-white/5 px-3 py-1.5 rounded-lg">
+                            📷 {photos.length} Photos
+                          </span>
+                        )}
 
-                {/* Card Content */}
-                <div className="p-6">
-                  {project.area && (
-                    <div className="flex items-center gap-2 text-[#FF6D29] text-xs font-semibold uppercase tracking-wider mb-3">
-                      <MapPin size={14} />
-                      {project.area}
-                    </div>
-                  )}
-
-                  <h3 className="text-xl font-bold text-white leading-snug">
-                    {project.title}
-                  </h3>
-
-                  <p className="text-[#BABABA] text-sm leading-6 mt-3 line-clamp-3">
-                    {project.description}
-                  </p>
-<div className="flex items-center justify-between gap-3 mt-6 pt-4 border-t border-white/10">
-  <div className="flex items-center gap-2 text-xs text-[#BABABA]">
-    <CalendarDays size={15} className="text-[#FF6D29]" />
-    {formatDate(project.date)}
-  </div>
-
-  <button
-    onClick={() => {
-      window.location.href = `/development/${project.id}`;
-    }}
-    className="flex items-center gap-1 text-[#FF6D29] text-sm font-semibold hover:gap-2 transition-all cursor-pointer"
-  >
-    Details
-    <ArrowUpRight size={16} />
-  </button>
-</div>
-
-                  {/* Media Counts */}
-                  {(project.photos?.length > 0 ||
-                    project.videos?.length > 0) && (
-                    <div className="flex flex-wrap gap-3 mt-4">
-                      {project.photos?.length > 0 && (
-                        <span className="text-xs text-[#BABABA] bg-white/5 px-3 py-1.5 rounded-lg">
-                          📷 {project.photos.length} Photos
-                        </span>
-                      )}
-
-                      {project.videos?.length > 0 && (
-                        <span className="text-xs text-[#BABABA] bg-white/5 px-3 py-1.5 rounded-lg">
-                          🎥 {project.videos.length} Videos
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </motion.article>
-            ))}
+                        {videos.length > 0 && (
+                          <span className="text-xs text-[#BABABA] bg-white/5 px-3 py-1.5 rounded-lg">
+                            🎥 {videos.length} Videos
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </motion.article>
+              );
+            })}
           </div>
         )}
 
         {/* View All */}
-{!fullPage && !loading && projects.length > 0 && (
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    whileInView={{ opacity: 1, y: 0 }}
-    viewport={{ once: true }}
-    transition={{ duration: 0.5 }}
-    className="flex justify-center mt-12"
-  >
-    <Link
-      to="/development"
-      className="group inline-flex items-center gap-3 px-7 py-4 rounded-xl bg-[#FF6D29] text-white font-bold hover:bg-[#e85b1c] hover:shadow-[0_8px_30px_rgba(255,109,41,0.25)] transition-all duration-300"
-    >
-      View All Development
-      <ArrowUpRight
-        size={18}
-        className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform duration-300"
-      />
-    </Link>
-  </motion.div>
-)}
+        {!fullPage && !loading && !loadError && projects.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="flex justify-center mt-12"
+          >
+            <Link
+              to="/development"
+              className="group inline-flex items-center gap-3 px-7 py-4 rounded-xl bg-[#FF6D29] text-white font-bold hover:bg-[#e85b1c] hover:shadow-[0_8px_30px_rgba(255,109,41,0.25)] transition-all duration-300"
+            >
+              View All Development
+              <ArrowUpRight
+                size={18}
+                className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform duration-300"
+              />
+            </Link>
+          </motion.div>
+        )}
       </div>
 
       {/* Project Details Modal */}
@@ -470,137 +466,141 @@ useEffect(() => {
                 </button>
               </div>
 
-              <div className="p-5 sm:p-7">
-                {/* Cover */}
-                {mediaMap[selectedProject.id]?.cover && (
-                  <div className="rounded-2xl overflow-hidden mb-6 bg-[#453027]">
-                    <img
-                      src={mediaMap[selectedProject.id].cover}
-                      alt={selectedProject.title}
-                      className="w-full max-h-[420px] object-cover"
-                    />
-                  </div>
-                )}
+              {(() => {
+                const coverUrl = getCoverUrl(selectedProject);
+                const photos = getPhotoUrls(selectedProject);
+                const videos = getVideoUrls(selectedProject);
 
-                {/* Metadata */}
-                <div className="flex flex-wrap gap-3 mb-5">
-                  {selectedProject.area && (
-                    <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF6D29]/10 border border-[#FF6D29]/20 text-[#FF6D29] text-sm">
-                      <MapPin size={15} />
-                      {selectedProject.area}
-                    </span>
-                  )}
+                return (
+                  <div className="p-5 sm:p-7">
+                    {/* Cover */}
+                    {coverUrl && (
+                      <div className="rounded-2xl overflow-hidden mb-6 bg-[#453027]">
+                        <img
+                          src={coverUrl}
+                          alt={selectedProject.title}
+                          className="w-full max-h-[420px] object-cover"
+                        />
+                      </div>
+                    )}
 
-                  <span
-                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm ${statusStyle(
-                      selectedProject.status
-                    )}`}
-                  >
-                    {selectedProject.status || "Planned"}
-                  </span>
+                    {/* Metadata */}
+                    <div className="flex flex-wrap gap-3 mb-5">
+                      {selectedProject.area && (
+                        <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF6D29]/10 border border-[#FF6D29]/20 text-[#FF6D29] text-sm">
+                          <MapPin size={15} />
+                          {selectedProject.area}
+                        </span>
+                      )}
 
-                  <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[#BABABA] text-sm">
-                    <CalendarDays size={15} className="text-[#FF6D29]" />
-                    {formatDate(selectedProject.date)}
-                  </span>
-                </div>
+                      <span
+                        className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-sm ${statusStyle(
+                          selectedProject.status
+                        )}`}
+                      >
+                        {selectedProject.status || "Planned"}
+                      </span>
 
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                  {selectedProject.title}
-                </h3>
-
-                <p className="text-[#BABABA] text-sm sm:text-base leading-7 mt-4 whitespace-pre-wrap">
-                  {selectedProject.description || "No description provided."}
-                </p>
-
-                {/* Photos */}
-                {mediaMap[selectedProject.id]?.photos?.length > 0 && (
-                  <div className="mt-9">
-                    <div className="flex items-center gap-2 mb-4">
-                      <ImageIcon className="text-[#FF6D29]" size={20} />
-
-                      <h3 className="text-white text-lg font-bold">
-                        Project Photos
-                      </h3>
-
-                      <span className="text-[#BABABA] text-sm">
-                        ({mediaMap[selectedProject.id].photos.length})
+                      <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[#BABABA] text-sm">
+                        <CalendarDays size={15} className="text-[#FF6D29]" />
+                        {formatDate(selectedProject.date)}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {mediaMap[selectedProject.id].photos.map(
-                        (photo, index) => (
-                          <button
-                            key={index}
-                            onClick={() =>
-                              setPhotoViewer({
-                                images: mediaMap[selectedProject.id].photos,
-                                index,
-                              })
-                            }
-                            className="relative aspect-square rounded-xl overflow-hidden bg-[#453027] group cursor-pointer"
-                          >
-                            <img
-                              src={photo}
-                              alt={`Project photo ${index + 1}`}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          </button>
-                        )
-                      )}
-                    </div>
+                    <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
+                      {selectedProject.title}
+                    </h3>
+
+                    <p className="text-[#BABABA] text-sm sm:text-base leading-7 mt-4 whitespace-pre-wrap">
+                      {selectedProject.description || "No description provided."}
+                    </p>
+
+                    {/* Photos */}
+                    {photos.length > 0 && (
+                      <div className="mt-9">
+                        <div className="flex items-center gap-2 mb-4">
+                          <ImageIcon className="text-[#FF6D29]" size={20} />
+
+                          <h3 className="text-white text-lg font-bold">
+                            Project Photos
+                          </h3>
+
+                          <span className="text-[#BABABA] text-sm">
+                            ({photos.length})
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {photos.map((photo, index) => (
+                            <button
+                              key={index}
+                              onClick={() =>
+                                setPhotoViewer({
+                                  images: photos,
+                                  index,
+                                })
+                              }
+                              className="relative aspect-square rounded-xl overflow-hidden bg-[#453027] group cursor-pointer"
+                            >
+                              <img
+                                src={photo}
+                                alt={`Project photo ${index + 1}`}
+                                loading="lazy"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Videos */}
+                    {videos.length > 0 && (
+                      <div className="mt-9">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Video className="text-[#FF6D29]" size={20} />
+
+                          <h3 className="text-white text-lg font-bold">
+                            Project Videos
+                          </h3>
+
+                          <span className="text-[#BABABA] text-sm">
+                            ({videos.length})
+                          </span>
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          {videos.map((video, index) => (
+                            <div
+                              key={index}
+                              className="rounded-xl overflow-hidden bg-black border border-white/10"
+                            >
+                              <video
+                                src={video}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full aspect-video"
+                              />
+
+                              <p className="px-3 py-2 text-xs text-[#BABABA]">
+                                Video {index + 1}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Empty Media */}
+                    {photos.length === 0 && videos.length === 0 && (
+                      <div className="mt-7 rounded-xl bg-white/5 border border-white/10 p-5 text-center text-sm text-[#BABABA]">
+                        No additional photos or videos available for this project.
+                      </div>
+                    )}
                   </div>
-                )}
-
-                {/* Videos */}
-                {mediaMap[selectedProject.id]?.videos?.length > 0 && (
-                  <div className="mt-9">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Video className="text-[#FF6D29]" size={20} />
-
-                      <h3 className="text-white text-lg font-bold">
-                        Project Videos
-                      </h3>
-
-                      <span className="text-[#BABABA] text-sm">
-                        ({mediaMap[selectedProject.id].videos.length})
-                      </span>
-                    </div>
-
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      {mediaMap[selectedProject.id].videos.map(
-                        (video, index) => (
-                          <div
-                            key={index}
-                            className="rounded-xl overflow-hidden bg-black border border-white/10"
-                          >
-                            <video
-                              src={video}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="w-full aspect-video"
-                            />
-
-                            <p className="px-3 py-2 text-xs text-[#BABABA]">
-                              Video {index + 1}
-                            </p>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Empty Media */}
-                {!mediaMap[selectedProject.id]?.photos?.length &&
-                  !mediaMap[selectedProject.id]?.videos?.length && (
-                    <div className="mt-7 rounded-xl bg-white/5 border border-white/10 p-5 text-center text-sm text-[#BABABA]">
-                      No additional photos or videos available for this project.
-                    </div>
-                  )}
-              </div>
+                );
+              })()}
             </motion.div>
           </motion.div>
         )}

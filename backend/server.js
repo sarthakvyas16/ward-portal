@@ -5,6 +5,10 @@ require("dotenv").config();
 
 const connectDB = require("./db");
 const wardTeamRoutes = require("./routes/wardTeamRoutes");
+const mediaRoutes = require("./routes/mediaRoutes");
+const developmentRoutes = require("./routes/developmentRoutes");
+
+
 
 const app = express();
 
@@ -15,6 +19,9 @@ app.use(express.json({ limit: "15mb" }));
 
 app.use("/api/ward-team", wardTeamRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/media", mediaRoutes);
+app.use("/api/development", developmentRoutes);
+
 
 app.get("/", (req, res) => {
   res.json({
