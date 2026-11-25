@@ -13,7 +13,6 @@ import {
   Phone,
   Save,
   X,
-  ChevronDown,
   LayoutGrid,
 } from "lucide-react";
 
@@ -42,6 +41,65 @@ const createInitialData = () => ({
   })),
   others: [],
 });
+
+// Member data ko safe format mein convert karta hai
+function normalizeMember(member) {
+  if (!member || typeof member !== "object") return null;
+
+  return {
+    id: member.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: String(member.name || ""),
+    designation: String(member.designation || ""),
+    phone: String(member.phone || ""),
+    photo: typeof member.photo === "string" ? member.photo : "",
+    description: String(member.description || ""),
+  };
+}
+
+// MongoDB/local data ko standard format mein convert karta hai
+function normalizeWardTeam(raw) {
+  const defaults = createInitialData();
+
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return defaults;
+  }
+
+  const rawLeaders =
+    raw.leaders && typeof raw.leaders === "object" && !Array.isArray(raw.leaders)
+      ? raw.leaders
+      : {};
+
+  const leaders = {
+    parshad: normalizeMember(rawLeaders.parshad),
+    sahyojak: normalizeMember(rawLeaders.sahyojak),
+    pravasi: normalizeMember(rawLeaders.pravasi),
+    prabhari: normalizeMember(rawLeaders.prabhari),
+  };
+
+  const rawBooths = Array.isArray(raw.booths) ? raw.booths : [];
+
+  const booths = defaults.booths.map((defaultBooth) => {
+    const booth = rawBooths.find(
+      (item) => Number(item?.id) === defaultBooth.id
+    );
+
+    return {
+      id: defaultBooth.id,
+      chairman: normalizeMember(booth?.chairman),
+      committee: Array.isArray(booth?.committee)
+        ? booth.committee.map(normalizeMember).filter(Boolean)
+        : [],
+    };
+  });
+
+  return {
+    leaders,
+    booths,
+    others: Array.isArray(raw.others)
+      ? raw.others.map(normalizeMember).filter(Boolean)
+      : [],
+  };
+}
 
 const leadershipRoles = [
   {
@@ -74,24 +132,20 @@ function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Purane Admin Ward Team data ko naye format mein convert karta hai.
+// Purane Admin Ward Team data ko naye format mein convert karta hai
 function migrateOldMembers(oldMembers) {
   const data = createInitialData();
 
   if (!Array.isArray(oldMembers)) return data;
 
   oldMembers.forEach((member) => {
-    const section = member.section;
-    const designation = (member.designation || "").toLowerCase();
+    if (!member || typeof member !== "object") return;
 
-    const cleanMember = {
-      id: member.id || makeId(),
-      name: member.name || "",
-      designation: member.designation || "",
-      phone: member.phone || "",
-      photo: member.photo || "",
-      description: member.description || "",
-    };
+    const section = member.section;
+    const designation = String(member.designation || "").toLowerCase();
+    const cleanMember = normalizeMember(member);
+
+    if (!cleanMember) return;
 
     if (section === "parshad") {
       data.leaders.parshad ||= cleanMember;
@@ -107,13 +161,12 @@ function migrateOldMembers(oldMembers) {
       }
     } else if (section === "booths") {
       const boothNum = parseInt(member.boothNumber, 10);
+
       if (boothNum >= 1 && boothNum <= 6) {
         data.booths[boothNum - 1].chairman ||= cleanMember;
       } else {
         data.others.push(cleanMember);
       }
-    } else if (section === "others") {
-      data.others.push(cleanMember);
     } else {
       data.others.push(cleanMember);
     }
@@ -122,7 +175,28 @@ function migrateOldMembers(oldMembers) {
   return data;
 }
 
-// Image ko compress karta hai taaki browser storage kam use ho.
+// Local storage se safe data load karta hai
+function getLocalWardTeam() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+
+    if (saved) {
+      return normalizeWardTeam(JSON.parse(saved));
+    }
+
+    const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
+
+    if (oldSaved) {
+      return normalizeWardTeam(migrateOldMembers(JSON.parse(oldSaved)));
+    }
+  } catch (error) {
+    console.error("Local Ward Team data error:", error);
+  }
+
+  return createInitialData();
+}
+
+// Image ko compress karta hai
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -147,8 +221,13 @@ function compressImage(file) {
         canvas.height = Math.round(image.height * ratio);
 
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
+        if (!ctx) {
+          reject(new Error("Canvas create nahi ho paaya."));
+          return;
+        }
+
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL("image/jpeg", 0.72));
       };
 
@@ -184,127 +263,91 @@ export default function AdminWardTeam() {
   const [activeBooth, setActiveBooth] = useState(1);
   const [search, setSearch] = useState("");
 
-  // Editor modal state
   const [editor, setEditor] = useState(null);
   const [draft, setDraft] = useState(emptyMember);
   const [photoLoading, setPhotoLoading] = useState(false);
 
-  
-  // Load Ward Team data from MongoDB, fallback to localStorage
-useEffect(() => {
-  const loadWardTeam = async () => {
-    try {
-      // First, try loading from MongoDB
-      const serverData = await getWardTeam();
-      console.log("MongoDB Ward Team Data:", serverData);
-
-      if (serverData) {
-        setData(serverData);
-        console.log("Ward Team loaded from MongoDB ✅");
-      } else {
-        // If MongoDB is empty, load old local data
-        const saved = localStorage.getItem(STORAGE_KEY);
-
-        if (saved) {
-          setData(JSON.parse(saved));
-        } else {
-          const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
-
-          if (oldSaved) {
-            const migrated = migrateOldMembers(JSON.parse(oldSaved));
-            setData(migrated);
-          }
-        }
-
-        console.log("Local Ward Team data loaded");
-      }
-    } catch (error) {
-      console.error("Ward Team load error:", error);
-
-      // If API fails, fallback to localStorage
+  // Load data from MongoDB; fallback to local storage
+  useEffect(() => {
+    const loadWardTeam = async () => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const serverData = await getWardTeam();
+        console.log("MongoDB Ward Team Data:", serverData);
 
-        if (saved) {
-          setData(JSON.parse(saved));
+        if (serverData && typeof serverData === "object") {
+          setData(normalizeWardTeam(serverData));
+          console.log("Ward Team loaded from MongoDB ✅");
         } else {
-          const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
-
-          if (oldSaved) {
-            setData(migrateOldMembers(JSON.parse(oldSaved)));
-          }
+          setData(getLocalWardTeam());
+          console.log("Local Ward Team data loaded");
         }
-      } catch (localError) {
-        console.error("Local data load error:", localError);
+      } catch (error) {
+        console.error("Ward Team load error:", error);
+        setData(getLocalWardTeam());
+      } finally {
+        setLoaded(true);
       }
-    } finally {
-      setLoaded(true);
-    }
-  };
+    };
 
-  loadWardTeam();
-}, []);
+    loadWardTeam();
+  }, []);
 
-  // Save Ward Team to MongoDB + Local Backup
-useEffect(() => {
-  if (!loaded) return;
+  // Save data to MongoDB + local backup
+  useEffect(() => {
+    if (!loaded) return;
 
-  const saveToServer = async () => {
-    try {
-      await saveWardTeam(data);
-
-      // Local backup bhi maintain rahega
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-
-      console.log("Ward Team saved to MongoDB ✅");
-    } catch (error) {
-      console.error("Ward Team save error:", error);
-
-      // Server fail hone par local backup
+    const saveToServer = async () => {
       try {
+        await saveWardTeam(data);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        console.log("Ward Team saved locally as backup");
-      } catch (localError) {
-        console.error("Local backup error:", localError);
-        alert(
-          "Storage bhar gaya hai. Kuch photos chhoti karo ya kuch purani photos hatao."
-        );
+        console.log("Ward Team saved to MongoDB ✅");
+      } catch (error) {
+        console.error("Ward Team save error:", error);
+
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          console.log("Ward Team saved locally as backup");
+        } catch (localError) {
+          console.error("Local backup error:", localError);
+          alert(
+            "Storage bhar gaya hai. Kuch photos chhoti karo ya kuch purani photos hatao."
+          );
+        }
       }
-    }
-  };
+    };
 
-  saveToServer();
-}, [data, loaded]);
+    saveToServer();
+  }, [data, loaded]);
 
-// Ward Team calculations
-const allMembers = [
-  ...Object.values(data?.leaders || {}).filter(Boolean),
-  ...(Array.isArray(data?.booths) ? data.booths : []).flatMap((booth) =>
-    [booth?.chairman, ...(Array.isArray(booth?.committee) ? booth.committee : [])].filter(Boolean)
-  ),
-  ...(Array.isArray(data?.others) ? data.others : []),
-];
+  // Ward Team calculations
+  const safeData = normalizeWardTeam(data);
 
-const totalCommittee = data.booths.reduce(
-  (total, booth) => total + booth.committee.length,
-  0
-);
+  const allMembers = [
+    ...Object.values(safeData.leaders).filter(Boolean),
+    ...safeData.booths.flatMap((booth) => [
+      booth.chairman,
+      ...booth.committee,
+    ].filter(Boolean)),
+    ...safeData.others,
+  ];
 
-const filteredMembers = (members) => {
-  const query = search.trim().toLowerCase();
-
-  if (!query) return members;
-
-  return members.filter((member) =>
-    [member.name, member.designation, member.phone].some((value) =>
-      (value || "").toLowerCase().includes(query)
-    )
+  const totalCommittee = safeData.booths.reduce(
+    (total, booth) => total + booth.committee.length,
+    0
   );
-};
 
+  const filteredMembers = (members) => {
+    const safeMembers = Array.isArray(members) ? members.filter(Boolean) : [];
+    const query = search.trim().toLowerCase();
 
+    if (!query) return safeMembers;
 
-
+    return safeMembers.filter((member) =>
+      [member.name, member.designation, member.phone].some((value) =>
+        String(value || "").toLowerCase().includes(query)
+      )
+    );
+  };
 
   // Open editor
   const openEditor = (type, boothId = null, member = null) => {
@@ -365,6 +408,8 @@ const filteredMembers = (members) => {
       return;
     }
 
+    if (!editor) return;
+
     const member = {
       ...draft,
       id: editor.memberId || makeId(),
@@ -374,11 +419,14 @@ const filteredMembers = (members) => {
     };
 
     setData((prev) => {
-      const next = structuredClone(prev);
+      const next = normalizeWardTeam(prev);
 
       if (editor.type.startsWith("leader:")) {
         const role = editor.type.split(":")[1];
-        next.leaders[role] = member;
+
+        if (role in next.leaders) {
+          next.leaders[role] = member;
+        }
       } else if (editor.type === "chairman") {
         const booth = next.booths.find((b) => b.id === editor.boothId);
         if (booth) booth.chairman = member;
@@ -390,7 +438,7 @@ const filteredMembers = (members) => {
             booth.committee = booth.committee.map((m) =>
               m.id === editor.memberId ? member : m
             );
-          } else {
+          } else if (booth.committee.length < 11) {
             booth.committee.push(member);
           }
         }
@@ -415,11 +463,14 @@ const filteredMembers = (members) => {
     if (!confirm("Kya sach mein is member ko delete karna hai?")) return;
 
     setData((prev) => {
-      const next = structuredClone(prev);
+      const next = normalizeWardTeam(prev);
 
       if (type.startsWith("leader:")) {
         const role = type.split(":")[1];
-        next.leaders[role] = null;
+
+        if (role in next.leaders) {
+          next.leaders[role] = null;
+        }
       } else if (type === "chairman") {
         const booth = next.booths.find((b) => b.id === boothId);
         if (booth) booth.chairman = null;
@@ -478,7 +529,7 @@ const filteredMembers = (members) => {
   );
 
   const LeaderCard = ({ role }) => {
-    const member = data.leaders[role.id];
+    const member = safeData.leaders[role.id];
     const Icon = role.icon;
 
     return (
@@ -517,7 +568,6 @@ const filteredMembers = (members) => {
   return (
     <div className="min-h-screen bg-[#161316] p-4 text-white sm:p-6 lg:p-8">
       <div className="mx-auto max-w-[1500px]">
-
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -535,17 +585,24 @@ const filteredMembers = (members) => {
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
             { label: "Total Members", value: allMembers.length, icon: Users },
-            { label: "Leadership", value: Object.values(data.leaders).filter(Boolean).length, icon: Crown },
-            { label: "Booths", value: data.booths.length, icon: LayoutGrid },
+            {
+              label: "Leadership",
+              value: Object.values(safeData.leaders).filter(Boolean).length,
+              icon: Crown,
+            },
+            { label: "Booths", value: safeData.booths.length, icon: LayoutGrid },
             { label: "Committee Members", value: totalCommittee, icon: Shield },
           ].map((stat) => {
             const Icon = stat.icon;
 
             return (
-              <div key={stat.label} className="rounded-2xl border border-white/10 bg-[#211C1D] p-4 sm:p-5">
+              <div
+                key={stat.label}
+                className="rounded-2xl border border-white/10 bg-[#211C1D] p-4 sm:p-5"
+              >
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-[#BABABA]">{stat.label}</p>
-                  <Icon size={17} className="text-[#FF6D29]" />
+                  <Icon size={17} className="text-[#FF6D29" />
                 </div>
                 <p className="mt-3 text-3xl font-black">{stat.value}</p>
               </div>
@@ -591,7 +648,7 @@ const filteredMembers = (members) => {
           <div>
             {/* Booth selector */}
             <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              {data.booths.map((booth) => (
+              {safeData.booths.map((booth) => (
                 <button
                   key={booth.id}
                   onClick={() => setActiveBooth(booth.id)}
@@ -610,17 +667,14 @@ const filteredMembers = (members) => {
               ))}
             </div>
 
-            {data.booths
+            {safeData.booths
               .filter((booth) => booth.id === activeBooth)
               .map((booth) => (
                 <div key={booth.id} className="space-y-6">
-
                   {/* Booth Header */}
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <h2 className="text-2xl font-black">
-                        Booth {booth.id}
-                      </h2>
+                      <h2 className="text-2xl font-black">Booth {booth.id}</h2>
                       <p className="mt-1 text-sm text-[#BABABA]">
                         Booth Adhyaksh + 11 Samiti Members
                       </p>
@@ -656,7 +710,9 @@ const filteredMembers = (members) => {
                   <div className="rounded-2xl border border-white/10 bg-[#211C1D] p-5 sm:p-6">
                     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h3 className="text-xl font-black">Booth {booth.id} Samiti</h3>
+                        <h3 className="text-xl font-black">
+                          Booth {booth.id} Samiti
+                        </h3>
                         <p className="mt-1 text-sm text-[#BABABA]">
                           {booth.committee.length} of 11 members added
                         </p>
@@ -743,9 +799,9 @@ const filteredMembers = (members) => {
               />
             </div>
 
-            {filteredMembers(data.others).length > 0 ? (
+            {filteredMembers(safeData.others).length > 0 ? (
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                {filteredMembers(data.others).map((member) => (
+                {filteredMembers(safeData.others).map((member) => (
                   <MemberCard
                     key={member.id}
                     member={member}
@@ -786,10 +842,13 @@ const filteredMembers = (members) => {
             </div>
 
             <div className="max-h-[75vh] space-y-5 overflow-y-auto p-5">
-
               {/* Photo */}
               <div className="flex items-center gap-4">
-                <MemberPhoto photo={draft.photo} name={draft.name} size="h-24 w-24" />
+                <MemberPhoto
+                  photo={draft.photo}
+                  name={draft.name}
+                  size="h-24 w-24"
+                />
 
                 <div className="flex flex-wrap gap-2">
                   <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs font-bold hover:border-[#FF6D29]">
